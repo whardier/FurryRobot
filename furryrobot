@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+
+import sys
+import socket
+import subprocess
+import time
+
+sio = socket.fromfd(0, socket.AF_INET, socket.SOCK_STREAM)
+
+orig_src_addr, orig_src_port = [str(x) for x in sio.getpeername()]
+orig_dst_addr = None
+orig_dst_port = None
+
+for i in range(10):
+
+    p = subprocess.Popen(['/usr/sbin/conntrack', '-L', '-p', 'tcp', '-s', orig_src_addr],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+
+    for line in p.stdout:
+        (ct_proto_name,
+         ct_proto_number,
+         ct_seconds_expire,
+         ct_state,
+         ct_orig_src_addr,
+         ct_orig_dst_addr,
+         ct_orig_src_port,
+         ct_orig_dst_port) = line.split()[:8]
+
+        ct_orig_src_addr = ct_orig_src_addr.split('=')[1]
+        ct_orig_dst_addr = ct_orig_dst_addr.split('=')[1]
+        ct_orig_src_port = ct_orig_src_port.split('=')[1]
+        ct_orig_dst_port = ct_orig_dst_port.split('=')[1]
+
+        if ct_orig_src_addr == orig_src_addr and ct_orig_src_port == orig_src_port:
+            orig_dst_addr = ct_orig_dst_addr
+            orig_dst_port = ct_orig_dst_port
+            break
+
+    time.sleep(0.1)
+
+if not orig_dst_addr:
+  sys.exit(1)
+
+p = subprocess.Popen(['ssh', '-c', 'blowfish', '-C', '-i', sys.argv[1], sys.argv[2], '-W' '%s:%s' % (orig_dst_addr, orig_dst_port)])
+
+p.communicate()
