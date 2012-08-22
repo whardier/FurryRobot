@@ -23,10 +23,10 @@ So simple a few lines of python could utilize it for a project like this.
 Requirements!
 =============
 
-Linux!
-IPTables!
-Conntrack!
-Python!
+- Linux!
+- IPTables!
+- Conntrack!
+- Python!
 
 How?
 ====
