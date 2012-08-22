@@ -7,7 +7,17 @@ feature.
 Why?
 ====
 
-Because it was fun
+Because it was fun.  Also because I was annoyed.  I often combine the two.
+
+This program was thought up "on the pot" so to say.  I simply wanted to get 
+behind our firewall without mucking with SOCKS, HTTP, or special connection 
+tunneling support programs for each individual TCP application.
+
+I also wanted to show off the -W flag OpenSSH has introduced into my world.
+
+I use the -W flag rather than setting up local/remote port forwarding because 
+its fast, it doesn't have to juggle multiple tunneled sockets, and it's simple.  
+So simple a few lines of python could utilize it for a project like this.
 
 How?
 ====
