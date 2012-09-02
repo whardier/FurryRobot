@@ -1,47 +1,129 @@
 #!/usr/bin/env python
+#
+# Copyright (c) 2012  Shane R. Spencer
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+# of the Software, and to permit persons to whom the Software is furnished to do
+# so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""Furry Robot: Simple VPN solution
+
+TODO: Add IPv6 Support
+TODO: Add Support UDP support
+"""
+
+import os
+import platform
+
+import logging
 
 import sys
 import socket
 import subprocess
-import time
 
-sio = socket.fromfd(0, socket.AF_INET, socket.SOCK_STREAM)
+from exceptions import NotImplementedError
+from exceptions import ValueError
 
-orig_src_addr, orig_src_port = [str(x) for x in sio.getpeername()]
-orig_dst_addr = None
-orig_dst_port = None
+from hashlib import sha256
 
-for i in range(10):
+def find_destination_proc_net_tcp(src_addr, src_port, family=4):
+    if family == 4:
+        file = '/proc/net/tcp'
+        src_addr_hex = ''.join(["%02X" % int(o) for o in src_addr.split('.')[::-1]])
+        src_port_hex = "%X" % src_port
+        src_pair_hex = ':'.join([src_addr_hex, src_port_hex])
+    else:
+        raise NotImplementedError('IPv4 is the only supported family')
 
-    p = subprocess.Popen(['/usr/sbin/conntrack', '-L', '-p', 'tcp', '-s', orig_src_addr],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
+    with open(file, 'r') as tcp:
+        lines = tcp.readlines()
+        lines.pop(0)
 
-    for line in p.stdout:
-        (ct_proto_name,
-         ct_proto_number,
-         ct_seconds_expire,
-         ct_state,
-         ct_orig_src_addr,
-         ct_orig_dst_addr,
-         ct_orig_src_port,
-         ct_orig_dst_port) = line.split()[:8]
+        #Step through netstat results in reverse since what we are looking for is probably towards the end
+        for line in lines[::-1]:
+            sl = [x for x in line.split(' ') if x]
+            if sl[1] == src_pair_hex:
+                dst_addr_hex, dst_port_hex = sl[2].split(":")
+                dst_addr = '.'.join([str(int(o, 16)) for o in [dst_addr_hex[i:i+2] for i in range(0,8,2)][::-1]])
+                dst_port = int(dst_port_hex, 16)
+                return dst_addr, dst_port
+                        
+    raise ValueError('No such port mapping')
 
-        ct_orig_src_addr = ct_orig_src_addr.split('=')[1]
-        ct_orig_dst_addr = ct_orig_dst_addr.split('=')[1]
-        ct_orig_src_port = ct_orig_src_port.split('=')[1]
-        ct_orig_dst_port = ct_orig_dst_port.split('=')[1]
+def check_control_master_openssh(identity, host):
+    file = '/tmp/CM%s.furryrobot' % sha256('%s:%s' % (identity, host)).hexdigest()
 
-        if ct_orig_src_addr == orig_src_addr and ct_orig_src_port == orig_src_port:
-            orig_dst_addr = ct_orig_dst_addr
-            orig_dst_port = ct_orig_dst_port
-            break
+    if os.path.exists(file):
+        return file
+    
+    p = subprocess.Popen(['ssh', '-c', 'blowfish', '-C', '-i', identity,
+        '-o', 'ControlMaster=yes', '-o', 'ControlPath=%s' % file, '-f', host, 'sleep 9999'], close_fds=True)
 
-    time.sleep(0.1)
+    p.communicate()
 
-if not orig_dst_addr:
-  sys.exit(1)
+    return file
 
-p = subprocess.Popen(['ssh', '-c', 'blowfish', '-C', '-i', sys.argv[1], sys.argv[2], '-W' '%s:%s' % (orig_dst_addr, orig_dst_port)])
+def redirect_to_openssh(identity, host, use_control_master, dst_addr, dst_port):
+    if use_control_master:
+        file = check_control_master_openssh(identity, host)
+        controlargs = ['-o', 'ControlMaster=auto', '-o', 'ControlPath=%s' % file]
+    else:
+        controlargs = []
 
-p.communicate()
+    p = subprocess.Popen(['ssh', '-c', 'blowfish', '-C', '-i', identity] + controlargs + [host, '-W', '%s:%s' % (dst_addr, dst_port)])
+    p.communicate()
+
+ROBOT = 'FURRY'
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='If you are seeing this something is wrong.')
+
+    parser.add_argument('--inetd', dest='inetd', action='store_true')
+
+    testparser = parser.add_argument_group('Test Options')
+    testparser.add_argument('--dst-addr', dest='dst_addr', action='store')
+    testparser.add_argument('--dst-port', dest='dst_port', type=int, action='store')
+
+    sshparser = parser.add_argument_group('SSH Options')
+    sshparser.add_argument('--ssh-identity-file', dest='ssh_identity_file', action='store')
+    sshparser.add_argument('--ssh-host', dest='ssh_host', action='store')
+    sshparser.add_argument('--ssh-control-master', dest='ssh_control_master', action='store_true')
+
+    args = parser.parse_args()
+
+    if args.dst_addr and args.dst_port:
+        dst_addr = args.dst_addr
+        dst_port = args.dst_port
+    elif args.inetd:
+        sio = socket.fromfd(0, socket.AF_INET, socket.SOCK_STREAM)
+        src_addr, src_port = [x for x in sio.getpeername()]
+        #Move to common function
+        if os.name == 'posix':
+            if platform.system() == 'Linux':
+                #function does the raise for us
+                dst_addr, dst_port = find_destination_proc_net_tcp(src_addr, src_port)
+            else:
+                raise NotImpementedError('Not an implemented posix platform')
+        else:
+            raise NotImpementedError('Not an implemented platform')
+    else:
+        raise ValueError('Try to do something')
+
+    #Execute SSH
+    redirect_to_openssh(args.ssh_identity_file, args.ssh_host, args.ssh_control_master, dst_addr, dst_port)
