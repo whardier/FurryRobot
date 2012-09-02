@@ -23,16 +23,9 @@ So simple a few lines of python could utilize it for a project like this.
 Requirements!
 =============
 
-<<<<<<< HEAD
-- Linux!
-- IPTables!
-- Conntrack!
-- Python!
-=======
 - Linux! (More operating systems soon!)
 - IPTables! (ipvw coming soon!)
 - Python! (or pypy!)
->>>>>>> whardier
 
 How?
 ====
