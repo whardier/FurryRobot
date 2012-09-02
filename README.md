@@ -16,17 +16,16 @@ tunneling support programs for each individual TCP application.
 I also wanted to show off the -W flag OpenSSH has introduced into my world.
 
 I use the -W flag rather than setting up local/remote port forwarding because 
-its fast, it doesn't have to juggle multiple tunneled sockets, and it's simple.  
+its fast, it doesn't have to juggle multiple tunneled sockets, and it's simple.
 
 So simple a few lines of python could utilize it for a project like this.
 
 Requirements!
 =============
 
-- Linux!
-- IPTables!
-- Conntrack!
-- Python!
+- Linux! (More operating systems soon!)
+- IPTables! (ipvw coming soon!)
+- Python! (or pypy!)
 
 How?
 ====
@@ -38,10 +37,10 @@ Inetd answers the request and starts up furryrobot, a python program, which then
 attempts to get the source address and port from inetd and then uses that 
 information against the list of connection tracking ports.
 
-The connection tracking table is scanned up to 10 times with a small wait 
-between while it populates.  Once a match is found the original destination 
-address and port are fed to an SSH process which takes over stdin/stdout of the 
-python script.  Tada.. "You're in."
+The TCP state connection table is read in and the source address and port are 
+used to match the connection line. Once a match is found the original 
+destination address and port are fed to an SSH process which takes over 
+stdin/stdout of the terminal.  Tada... you're in.
 
 How do I.. do what exactly?
 ===========================
@@ -54,17 +53,20 @@ then you're ready to get started.
 I use OpenBSD-inetd.. here's the line in my config:
 
     # <service_name> <sock_type> <proto> <flags> <user> <server_path> <args>
-    65535   stream  tcp nowait  root /usr/local/bin/furryrobot furryrobot /root/.ssh/id_dsa remoteuser@remotetunnelserver
-
-That's right.  I'm running it as root.  If I don't run it as root I won't have 
-access to the connection tracking tables!
+    65535   stream  tcp nowait  spencersr /usr/local/bin/furryrobot furryrobot --inetd --ssh-identity-file /home/spencersr/.ssh/id_dsa_furryrobot --ssh-host remoteuser@remotetunnelserver
 
 Now for the IPTables line:
 
-    itables -t nat -A OUTPUT -d 10.0.0.0/8 -p tcp -m tcp -j REDIRECT --to-ports 65535
+    itables -t nat -A OUTPUT -d 10.0.0.0/8 -o lo -p tcp -m tcp -j REDIRECT --to-ports 65535
 
-Now when I try to reach 10.0.0.0/8 on ANY port it will be redirected to the 
+And finally the route command:
+
+    ip route add 10.0.0.0/8 dev lo metric 100
+
+Now when I try to reach 10.0.0.0/8 on ANY port it will be redirected to the local interface, intercepted by iptables, and then 
 local machine at port 65535 where inetd is listening.
+
+The route line is very important.  It removes the need to know what your current default route is and allows local networks to have preference.
 
 You're basically done at this point.  Try to telnet to somewhere behind 
 `remotetunnelserver` on a port that's listening.. for instance:
