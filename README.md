@@ -20,6 +20,14 @@ its fast, it doesn't have to juggle multiple tunneled sockets, and it's simple.
 
 So simple a few lines of python could utilize it for a project like this.
 
+Requirements!
+=============
+
+- Linux!
+- IPTables!
+- Conntrack!
+- Python!
+
 How?
 ====
 
